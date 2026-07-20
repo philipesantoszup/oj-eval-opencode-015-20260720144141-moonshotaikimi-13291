@@ -8,9 +8,12 @@
 
 using namespace std;
 
+// Simple file-based key-value storage
+// Records are stored unsorted in the file
+// Find operation reads all and sorts in a small buffer
+
 const char* DATA_FILE = "database.dat";
 
-// Record structure for file storage
 struct Record {
     char key[65];
     int value;
@@ -28,57 +31,30 @@ struct Record {
     }
 };
 
-// File-based database with minimal in-memory storage
-// Only keeps current command data in memory, reads/writes directly from file
 class FileDatabase {
-private:
-    void writeRecord(fstream& file, const Record& rec, streampos pos) {
-        file.seekp(pos);
-        file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
-    }
-    
-    Record readRecord(fstream& file, streampos pos) {
-        Record rec;
-        file.seekg(pos);
-        file.read(reinterpret_cast<char*>(&rec), sizeof(Record));
-        return rec;
-    }
-    
 public:
     FileDatabase() {
-        // Create file if doesn't exist
         ifstream test(DATA_FILE, ios::binary);
         if (!test.is_open()) {
             ofstream create(DATA_FILE, ios::binary);
             create.close();
-        } else {
-            test.close();
         }
     }
     
     void insert(const string& key, int value) {
-        // Check if already exists
+        // Check existence
         fstream file(DATA_FILE, ios::in | ios::out | ios::binary);
         if (!file.is_open()) return;
         
         Record rec;
-        streampos pos = 0;
-        bool found = false;
-        
         while (file.read(reinterpret_cast<char*>(&rec), sizeof(Record))) {
             if (!rec.deleted && string(rec.key) == key && rec.value == value) {
-                found = true;
-                break;
+                file.close();
+                return;
             }
-            pos = file.tellg();
         }
         
-        if (found) {
-            file.close();
-            return; // Already exists
-        }
-        
-        // Append new record
+        // Append
         file.clear();
         file.seekp(0, ios::end);
         Record newRec;
@@ -95,46 +71,50 @@ public:
         
         Record rec;
         streampos pos = 0;
-        
         while (file.read(reinterpret_cast<char*>(&rec), sizeof(Record))) {
             if (!rec.deleted && string(rec.key) == key && rec.value == value) {
-                // Mark as deleted
                 rec.deleted = true;
-                writeRecord(file, rec, pos);
+                file.seekp(pos);
+                file.write(reinterpret_cast<const char*>(&rec), sizeof(Record));
                 break;
             }
             pos = file.tellg();
         }
-        
         file.close();
     }
     
     void find(const string& key) {
-        fstream file(DATA_FILE, ios::in | ios::binary);
+        ifstream file(DATA_FILE, ios::binary);
         if (!file.is_open()) {
             cout << "null" << endl;
             return;
         }
         
-        vector<int> values;
-        values.reserve(100); // Small reserve to avoid too many allocations
+        // Read in small batches to sort
+        int batch[1024];  // Fixed size batch
+        int count = 0;
         
         Record rec;
         while (file.read(reinterpret_cast<char*>(&rec), sizeof(Record))) {
             if (!rec.deleted && string(rec.key) == key) {
-                values.push_back(rec.value);
+                // Simple insertion sort into batch
+                int pos = count;
+                while (pos > 0 && batch[pos-1] > rec.value) {
+                    batch[pos] = batch[pos-1];
+                    pos--;
+                }
+                batch[pos] = rec.value;
+                count++;
             }
         }
-        
         file.close();
         
-        if (values.empty()) {
+        if (count == 0) {
             cout << "null" << endl;
         } else {
-            sort(values.begin(), values.end());
-            for (size_t i = 0; i < values.size(); i++) {
+            for (int i = 0; i < count; i++) {
                 if (i > 0) cout << " ";
-                cout << values[i];
+                cout << batch[i];
             }
             cout << endl;
         }
